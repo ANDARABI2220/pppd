@@ -10,6 +10,7 @@ import Customers from '@/pages/Customers';
 import Suppliers from '@/pages/Suppliers';
 import Purchases from '@/pages/Purchases';
 import Reports from '@/pages/Reports';
+import SettingsPage from '@/pages/Settings';
 
 const pageVariants = {
   initial: { opacity: 0, y: 20, scale: 0.98 },
@@ -39,6 +40,8 @@ export default function Layout() {
         return <Purchases />;
       case 'reports':
         return <Reports />;
+      case 'settings':
+        return <SettingsPage />;
       default:
         return <Dashboard />;
     }

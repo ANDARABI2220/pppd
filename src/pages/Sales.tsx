@@ -1,58 +1,67 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Plus,
-  Search,
-  Eye,
-  Trash2,
-  ShoppingCart,
-  Minus,
-  X,
+  Plus, Search, Eye, Trash2, ShoppingCart, Minus, X, Download, Edit, Truck,
 } from 'lucide-react';
 import Modal from '@/components/Modal';
 import DeleteConfirm from '@/components/DeleteConfirm';
 import EmptyState from '@/components/EmptyState';
-import { db, formatCurrency, formatDate, generateInvoiceNumber } from '@/db/database';
-import type { Sale, SaleItem, Product } from '@/types';
+import Toast, { type ToastType } from '@/components/Toast';
+import { db, formatCurrency, formatDate, generateInvoiceNumber, exportToCSV, addStockHistory } from '@/db/database';
+import type { Sale, SaleItem, Product, Customer } from '@/types';
 
 const paymentMethods = ['نقدی', 'کارتی', 'حواله بانکی', 'نسیه'];
 
 export default function Sales() {
   const [sales, setSales] = useState<Sale[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
+  const [editingSale, setEditingSale] = useState<Sale | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<Sale | null>(null);
+  const [toast, setToast] = useState({ message: '', type: 'success' as ToastType, visible: false });
 
   const [customerName, setCustomerName] = useState('');
+  const [customerId, setCustomerId] = useState<number | ''>('');
   const [items, setItems] = useState<SaleItem[]>([]);
   const [discount, setDiscount] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState(paymentMethods[0]);
   const [selectedProductId, setSelectedProductId] = useState<number | ''>('');
   const [quantity, setQuantity] = useState(1);
+  const [shipmentDate, setShipmentDate] = useState('');
+  const [shipmentReason, setShipmentReason] = useState('');
 
-  useEffect(() => {
-    loadData();
+  const showToast = useCallback((msg: string, type: ToastType = 'success') => {
+    setToast({ message: msg, type, visible: true });
   }, []);
 
+  useEffect(() => { loadData(); }, []);
+
   async function loadData() {
-    const [s, p] = await Promise.all([
+    const [s, p, c] = await Promise.all([
       db.sales.orderBy('id').reverse().toArray(),
       db.products.toArray(),
+      db.customers.toArray(),
     ]);
-    setSales(s);
-    setProducts(p);
+    setSales(s); setProducts(p); setCustomers(c);
   }
 
+  function resetForm() {
+    setCustomerName(''); setCustomerId(''); setItems([]); setDiscount(0);
+    setPaymentMethod(paymentMethods[0]); setSelectedProductId(''); setQuantity(1);
+    setShipmentDate(''); setShipmentReason(''); setEditingSale(null);
+  }
   function openAddModal() {
-    setCustomerName('');
-    setItems([]);
-    setDiscount(0);
-    setPaymentMethod(paymentMethods[0]);
-    setSelectedProductId('');
-    setQuantity(1);
+    resetForm();
+    setShowModal(true);
+  }
+  function openEditModal(sale: Sale) {
+    setEditingSale(sale); setCustomerName(sale.customerName); setCustomerId(sale.customerId || '');
+    setItems([...sale.items]); setDiscount(sale.discount); setPaymentMethod(sale.paymentMethod);
+    setShipmentDate(sale.shipmentDate || ''); setShipmentReason(sale.shipmentReason || '');
     setShowModal(true);
   }
 
@@ -74,6 +83,7 @@ export default function Sales() {
         productName: product.name,
         quantity,
         unitPrice: product.salePrice,
+        purchasePrice: product.purchasePrice,
         totalPrice: quantity * product.salePrice,
       }]);
     }
@@ -97,44 +107,76 @@ export default function Sales() {
   const totalAmount = items.reduce((sum, i) => sum + i.totalPrice, 0);
   const netAmount = totalAmount - discount;
 
+  const costOfGoods = items.reduce((sum, i) => {
+    const p = products.find(x => x.id === i.productId);
+    return sum + (p ? p.purchasePrice * i.quantity : 0);
+  }, 0);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (items.length === 0) return;
 
-    const sale: Omit<Sale, 'id'> = {
-      invoiceNumber: generateInvoiceNumber(),
-      customerName: customerName || 'مشتری عمومی',
-      items,
-      totalAmount,
-      discount,
-      netAmount,
-      paymentMethod,
-      status: 'completed',
-      date: new Date(),
-      createdAt: new Date(),
-    };
-
-    await db.sales.add(sale as Sale);
-
-    for (const item of items) {
-      const product = await db.products.get(item.productId);
-      if (product?.id) {
-        await db.products.update(product.id, {
-          stock: Math.max(0, product.stock - item.quantity),
-        });
+    if (editingSale?.id) {
+      for (const oldItem of editingSale.items) {
+        const product = await db.products.get(oldItem.productId);
+        if (product?.id) {
+          await db.products.update(product.id, { stock: product.stock + oldItem.quantity });
+          await addStockHistory(product.id, product.name, oldItem.quantity, product.stock + oldItem.quantity, '\u0628\u0631\u06af\u0634\u062a \u0627\u0632 \u0648\u06cc\u0631\u0627\u06cc\u0634 \u0641\u0627\u06a9\u062a\u0648\u0631');
+        }
       }
+      for (const item of items) {
+        const product = await db.products.get(item.productId);
+        if (product?.id) {
+          const newStock = Math.max(0, product.stock - item.quantity);
+          await db.products.update(product.id, { stock: newStock });
+          await addStockHistory(product.id, product.name, -item.quantity, newStock, '\u0641\u0631\u0648\u0634 (\u0648\u06cc\u0631\u0627\u06cc\u0634)');
+        }
+      }
+      await db.sales.update(editingSale.id, {
+        customerName: customerName || '\u0645\u0634\u062a\u0631\u06cc \u0639\u0645\u0648\u0645\u06cc', customerId: customerId || undefined, items, totalAmount, discount, netAmount, paymentMethod, costOfGoods, shipmentDate: shipmentDate || undefined, shipmentReason: shipmentReason || undefined,
+      });
+      showToast('\u0641\u0627\u06a9\u062a\u0648\u0631 \u0628\u0631\u0648\u0632\u0631\u0633\u0627\u0646\u06cc \u0634\u062f');
+    } else {
+      const sale: Omit<Sale, 'id'> = {
+        invoiceNumber: generateInvoiceNumber(),
+        customerName: customerName || '\u0645\u0634\u062a\u0631\u06cc \u0639\u0645\u0648\u0645\u06cc',
+        customerId: customerId || undefined,
+        items, totalAmount, discount, netAmount, paymentMethod, costOfGoods,
+        shipmentDate: shipmentDate || undefined, shipmentReason: shipmentReason || undefined,
+        status: 'completed', date: new Date(), createdAt: new Date(),
+      };
+      await db.sales.add(sale as Sale);
+      for (const item of items) {
+        const product = await db.products.get(item.productId);
+        if (product?.id) {
+          const newStock = Math.max(0, product.stock - item.quantity);
+          await db.products.update(product.id, { stock: newStock });
+          await addStockHistory(product.id, product.name, -item.quantity, newStock, '\u0641\u0631\u0648\u0634');
+        }
+      }
+      showToast('\u0641\u0631\u0648\u0634 \u062c\u062f\u06cc\u062f \u062b\u0628\u062a \u0634\u062f');
     }
-
-    setShowModal(false);
-    loadData();
+    setShowModal(false); loadData();
   }
 
   async function handleDelete() {
     if (deleteTarget?.id) {
+      for (const item of deleteTarget.items) {
+        const product = await db.products.get(item.productId);
+        if (product?.id) {
+          const newStock = product.stock + item.quantity;
+          await db.products.update(product.id, { stock: newStock });
+          await addStockHistory(product.id, product.name, item.quantity, newStock, '\u0628\u0631\u06af\u0634\u062a \u0627\u0632 \u062d\u0630\u0641 \u0641\u0627\u06a9\u062a\u0648\u0631');
+        }
+      }
       await db.sales.delete(deleteTarget.id);
-      setDeleteTarget(null);
-      loadData();
+      setDeleteTarget(null); showToast('\u0641\u0627\u06a9\u062a\u0648\u0631 \u062d\u0630\u0641 \u0634\u062f'); loadData();
     }
+  }
+
+  function handleExport() {
+    exportToCSV(filtered.map(s => ({ '\u0634\u0645\u0627\u0631\u0647 \u0641\u0627\u06a9\u062a\u0648\u0631': s.invoiceNumber, '\u0645\u0634\u062a\u0631\u06cc': s.customerName, '\u062a\u0627\u0631\u06cc\u062e': formatDate(s.date), '\u0645\u0628\u0644\u063a \u06a9\u0644': s.totalAmount, '\u062a\u062e\u0641\u06cc\u0641': s.discount, '\u0645\u0628\u0644\u063a \u062e\u0627\u0644\u0635': s.netAmount, '\u067e\u0631\u062f\u0627\u062e\u062a': s.paymentMethod, '\u0648\u0636\u0639\u06cc\u062a': s.status })), 'sales');
+    showToast('\u0641\u0627\u06cc\u0644 CSV \u062f\u0627\u0646\u0644\u0648\u062f \u0634\u062f');
   }
 
   function viewDetail(sale: Sale) {
@@ -158,40 +200,22 @@ export default function Sales() {
 
   return (
     <div className="space-y-6">
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
-      >
+      <AnimatePresence>{toast.visible && <Toast message={toast.message} type={toast.type} isVisible={true} onClose={() => setToast(t => ({...t, visible: false}))} />}</AnimatePresence>
+      <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">فروش (دخل)</h1>
           <p className="text-sm text-slate-500 mt-1">مدیریت فاکتورهای فروش</p>
         </div>
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={openAddModal}
-          className="btn-primary flex items-center gap-2"
-        >
-          <Plus size={18} />
-          فروش جدید
-        </motion.button>
+        <div className="flex gap-2">
+          <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={handleExport} className="btn-secondary flex items-center gap-2"><Download size={18} /> خروجی CSV</motion.button>
+          <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={openAddModal} className="btn-primary flex items-center gap-2"><Plus size={18} /> فروش جدید</motion.button>
+        </div>
       </motion.div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.1 }}
-      >
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
         <div className="relative">
           <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-          <input
-            type="text"
-            placeholder="جستجو بر اساس شماره فاکتور یا نام مشتری..."
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            className="input-field pr-10"
-          />
+          <input type="text" placeholder="جستجو بر اساس شماره فاکتور یا نام مشتری..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="input-field pr-10" />
         </div>
       </motion.div>
 
@@ -250,23 +274,10 @@ export default function Sales() {
                           </span>
                         </td>
                         <td className="p-4">
-                          <div className="flex items-center justify-center gap-2">
-                            <motion.button
-                              whileHover={{ scale: 1.1 }}
-                              whileTap={{ scale: 0.9 }}
-                              onClick={() => viewDetail(sale)}
-                              className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center justify-center transition-colors"
-                            >
-                              <Eye size={14} />
-                            </motion.button>
-                            <motion.button
-                              whileHover={{ scale: 1.1 }}
-                              whileTap={{ scale: 0.9 }}
-                              onClick={() => setDeleteTarget(sale)}
-                              className="w-8 h-8 rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100 flex items-center justify-center transition-colors"
-                            >
-                              <Trash2 size={14} />
-                            </motion.button>
+                          <div className="flex items-center justify-center gap-1">
+                            <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} onClick={() => viewDetail(sale)} className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center justify-center transition-colors" title="مشاهده"><Eye size={14} /></motion.button>
+                            <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} onClick={() => openEditModal(sale)} className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 hover:bg-amber-100 flex items-center justify-center transition-colors" title="ویرایش"><Edit size={14} /></motion.button>
+                            <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} onClick={() => setDeleteTarget(sale)} className="w-8 h-8 rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100 flex items-center justify-center transition-colors" title="حذف"><Trash2 size={14} /></motion.button>
                           </div>
                         </td>
                       </motion.tr>
@@ -279,35 +290,35 @@ export default function Sales() {
         </motion.div>
       )}
 
-      <Modal
-        isOpen={showModal}
-        onClose={() => setShowModal(false)}
-        title="فروش جدید"
-        size="xl"
-      >
+      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title={editingSale ? 'ویرایش فاکتور' : 'فروش جدید'} size="xl">
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">مشتری ثبت‌شده</label>
+              <select value={customerId} onChange={e => { setCustomerId(e.target.value ? Number(e.target.value) : ''); const c = customers.find(x => x.id === Number(e.target.value)); if (c) setCustomerName(c.name); }} className="input-field">
+                <option value="">انتخاب مشتری (اختیاری)</option>
+                {customers.map(c => (<option key={c.id} value={c.id}>{c.name} - {c.phone || ''}</option>))}
+              </select>
+            </div>
+            <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">نام مشتری</label>
-              <input
-                type="text"
-                value={customerName}
-                onChange={e => setCustomerName(e.target.value)}
-                className="input-field"
-                placeholder="مشتری عمومی"
-              />
+              <input type="text" value={customerName} onChange={e => setCustomerName(e.target.value)} className="input-field" placeholder="مشتری عمومی" />
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">روش پرداخت</label>
-              <select
-                value={paymentMethod}
-                onChange={e => setPaymentMethod(e.target.value)}
-                className="input-field"
-              >
-                {paymentMethods.map(m => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
+              <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)} className="input-field">
+                {paymentMethods.map(m => (<option key={m} value={m}>{m}</option>))}
               </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-1"><Truck size={14} /> تاریخ حمل</label>
+              <input type="date" value={shipmentDate} onChange={e => setShipmentDate(e.target.value)} className="input-field" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">دلیل حمل</label>
+              <input type="text" value={shipmentReason} onChange={e => setShipmentReason(e.target.value)} className="input-field" placeholder="اختیاری" />
             </div>
           </div>
 

@@ -1,3 +1,11 @@
+export interface BatchItem {
+  id: string;
+  quantity: number;
+  expiryDate?: string;
+  purchaseDate: string;
+  note?: string;
+}
+
 export interface Product {
   id?: number;
   name: string;
@@ -7,8 +15,28 @@ export interface Product {
   salePrice: number;
   stock: number;
   minStock: number;
+  reorderPoint: number;
   barcode?: string;
   description?: string;
+  expiryDate?: string;
+  batches: BatchItem[];
+  createdAt: Date;
+}
+
+export interface StockHistory {
+  id?: number;
+  productId: number;
+  productName: string;
+  quantityChange: number;
+  newStock: number;
+  reason: string;
+  date: Date;
+}
+
+export interface Category {
+  id?: number;
+  name: string;
+  type: 'product' | 'expense';
   createdAt: Date;
 }
 
@@ -36,6 +64,7 @@ export interface SaleItem {
   productName: string;
   quantity: number;
   unitPrice: number;
+  purchasePrice: number;
   totalPrice: number;
 }
 
@@ -48,8 +77,11 @@ export interface Sale {
   totalAmount: number;
   discount: number;
   netAmount: number;
+  costOfGoods: number;
   paymentMethod: string;
   status: 'completed' | 'pending' | 'cancelled';
+  shipmentDate?: string;
+  shipmentReason?: string;
   date: Date;
   createdAt: Date;
 }
@@ -61,6 +93,8 @@ export interface Expense {
   amount: number;
   date: Date;
   paymentMethod: string;
+  shipmentDate?: string;
+  shipmentReason?: string;
   createdAt: Date;
 }
 
@@ -86,11 +120,19 @@ export interface DashboardStats {
   totalSales: number;
   totalExpenses: number;
   totalProfit: number;
+  netProfit: number;
+  costOfGoods: number;
   totalProducts: number;
   lowStockProducts: number;
   totalCustomers: number;
   todaySales: number;
   todayExpenses: number;
+}
+
+export interface AppSettings {
+  id?: number;
+  key: string;
+  value: string;
 }
 
 export type PageType =
@@ -101,4 +143,5 @@ export type PageType =
   | 'customers'
   | 'suppliers'
   | 'purchases'
-  | 'reports';
+  | 'reports'
+  | 'settings';

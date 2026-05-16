@@ -1,13 +1,9 @@
-import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { useState, useEffect, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Calendar,
-  TrendingUp,
-  TrendingDown,
-  DollarSign,
-  Download,
-  Filter,
+  Calendar, TrendingUp, TrendingDown, DollarSign, Download, Filter,
 } from 'lucide-react';
+import Toast, { type ToastType } from '@/components/Toast';
 import {
   BarChart,
   Bar,
@@ -20,7 +16,7 @@ import {
   Line,
   Legend,
 } from 'recharts';
-import { db, formatCurrency } from '@/db/database';
+import { db, formatCurrency, formatDate, exportToCSV } from '@/db/database';
 import type { Sale, Expense } from '@/types';
 
 type ReportPeriod = 'daily' | 'monthly' | 'yearly';
@@ -30,39 +26,46 @@ export default function Reports() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [period, setPeriod] = useState<ReportPeriod>('monthly');
   const [startDate, setStartDate] = useState(() => {
-    const d = new Date();
-    d.setMonth(d.getMonth() - 6);
-    return d.toISOString().split('T')[0];
+    const d = new Date(); d.setMonth(d.getMonth() - 6); return d.toISOString().split('T')[0];
   });
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [filterCategory, setFilterCategory] = useState('');
+  const [filterProduct, setFilterProduct] = useState('');
+  const [toast, setToast] = useState({ message: '', type: 'success' as ToastType, visible: false });
 
-  useEffect(() => {
-    loadData();
+  const showToast = useCallback((msg: string, type: ToastType = 'success') => {
+    setToast({ message: msg, type, visible: true });
   }, []);
 
+  useEffect(() => { loadData(); }, []);
+
   async function loadData() {
-    const [s, e] = await Promise.all([
-      db.sales.toArray(),
-      db.expenses.toArray(),
-    ]);
-    setSales(s);
-    setExpenses(e);
+    const [s, e] = await Promise.all([db.sales.toArray(), db.expenses.toArray()]);
+    setSales(s); setExpenses(e);
   }
+
+  const expenseCategories = [...new Set(expenses.map(e => e.category))];
+  const productNames = [...new Set(sales.flatMap(s => s.items.map(i => i.productName)))];
 
   const filteredSales = sales.filter(s => {
     const d = new Date(s.date);
-    return d >= new Date(startDate) && d <= new Date(endDate + 'T23:59:59') && s.status === 'completed';
+    const inRange = d >= new Date(startDate) && d <= new Date(endDate + 'T23:59:59') && s.status === 'completed';
+    const matchProduct = !filterProduct || s.items.some(i => i.productName === filterProduct);
+    return inRange && matchProduct;
   });
 
   const filteredExpenses = expenses.filter(e => {
     const d = new Date(e.date);
-    return d >= new Date(startDate) && d <= new Date(endDate + 'T23:59:59');
+    const inRange = d >= new Date(startDate) && d <= new Date(endDate + 'T23:59:59');
+    const matchCat = !filterCategory || e.category === filterCategory;
+    return inRange && matchCat;
   });
 
+  const totalCOGS = filteredSales.reduce((sum, s) => sum + (s.costOfGoods || 0), 0);
   const totalSales = filteredSales.reduce((sum, s) => sum + s.netAmount, 0);
   const totalExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
-  const totalProfit = totalSales - totalExpenses;
-  const profitMargin = totalSales > 0 ? ((totalProfit / totalSales) * 100).toFixed(1) : '0';
+  const netProfit = totalSales - totalCOGS - totalExpenses;
+  const profitMargin = totalSales > 0 ? ((netProfit / totalSales) * 100).toFixed(1) : '0';
 
   function getChartData() {
     const dataMap = new Map<string, { فروش: number; مصارف: number; سود: number }>();
@@ -135,106 +138,55 @@ export default function Reports() {
   const expenseCategoryData = getExpenseCategoryData();
   const topProductsData = getTopProductsData();
 
-  function exportReport() {
-    const report = {
-      period: { start: startDate, end: endDate },
-      summary: {
-        totalSales,
-        totalExpenses,
-        totalProfit,
-        profitMargin: profitMargin + '%',
-        salesCount: filteredSales.length,
-      },
-      sales: filteredSales.map(s => ({
-        invoice: s.invoiceNumber,
-        customer: s.customerName,
-        amount: s.netAmount,
-        date: new Date(s.date).toLocaleDateString('fa-AF'),
-      })),
-      expenses: filteredExpenses.map(e => ({
-        category: e.category,
-        description: e.description,
-        amount: e.amount,
-        date: new Date(e.date).toLocaleDateString('fa-AF'),
-      })),
-    };
-
-    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `report-${startDate}-to-${endDate}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+  function exportSalesCSV() {
+    exportToCSV(filteredSales.map(s => ({ '\u0634\u0645\u0627\u0631\u0647': s.invoiceNumber, '\u0645\u0634\u062a\u0631\u06cc': s.customerName, '\u062a\u0627\u0631\u06cc\u062e': formatDate(s.date), '\u0645\u0628\u0644\u063a': s.netAmount, '\u062a\u062e\u0641\u06cc\u0641': s.discount, COGS: s.costOfGoods || 0, '\u067e\u0631\u062f\u0627\u062e\u062a': s.paymentMethod })), 'report-sales');
+    showToast('\u06af\u0632\u0627\u0631\u0634 \u0641\u0631\u0648\u0634 CSV \u062f\u0627\u0646\u0644\u0648\u062f \u0634\u062f');
+  }
+  function exportExpensesCSV() {
+    exportToCSV(filteredExpenses.map(e => ({ '\u062f\u0633\u062a\u0647\u200c\u0628\u0646\u062f\u06cc': e.category, '\u0634\u0631\u062d': e.description, '\u0645\u0628\u0644\u063a': e.amount, '\u062a\u0627\u0631\u06cc\u062e': formatDate(e.date), '\u067e\u0631\u062f\u0627\u062e\u062a': e.paymentMethod })), 'report-expenses');
+    showToast('\u06af\u0632\u0627\u0631\u0634 \u0645\u0635\u0627\u0631\u0641 CSV \u062f\u0627\u0646\u0644\u0648\u062f \u0634\u062f');
   }
 
   return (
     <div className="space-y-6">
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
-      >
+      <AnimatePresence>{toast.visible && <Toast message={toast.message} type={toast.type} isVisible={true} onClose={() => setToast(t => ({...t, visible: false}))} />}</AnimatePresence>
+      <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">گزارش‌ها</h1>
           <p className="text-sm text-slate-500 mt-1">گزارش‌های مالی و تحلیل عملکرد</p>
         </div>
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={exportReport}
-          className="btn-primary flex items-center gap-2"
-        >
-          <Download size={18} />
-          دانلود گزارش
-        </motion.button>
+        <div className="flex gap-2">
+          <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={exportSalesCSV} className="btn-secondary flex items-center gap-2"><Download size={16} /> فروش CSV</motion.button>
+          <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={exportExpensesCSV} className="btn-secondary flex items-center gap-2"><Download size={16} /> مصارف CSV</motion.button>
+        </div>
       </motion.div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.1 }}
-        className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100"
-      >
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
         <div className="flex items-center gap-2 mb-4">
           <Filter size={16} className="text-slate-500" />
           <span className="text-sm font-medium text-slate-700">فیلتر گزارش</span>
         </div>
-        <div className="flex flex-col sm:flex-row gap-4">
-          <div className="flex items-center gap-2 flex-1">
-            <Calendar size={16} className="text-slate-400" />
-            <input
-              type="date"
-              value={startDate}
-              onChange={e => setStartDate(e.target.value)}
-              className="input-field"
-            />
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col sm:flex-row items-center gap-2">
+            <Calendar size={16} className="text-slate-400 flex-shrink-0" />
+            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="input-field" />
             <span className="text-sm text-slate-400">تا</span>
-            <input
-              type="date"
-              value={endDate}
-              onChange={e => setEndDate(e.target.value)}
-              className="input-field"
-            />
+            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="input-field" />
           </div>
-          <div className="flex gap-2">
-            {([
-              { id: 'daily' as ReportPeriod, label: 'روزانه' },
-              { id: 'monthly' as ReportPeriod, label: 'ماهانه' },
-              { id: 'yearly' as ReportPeriod, label: 'سالانه' },
-            ]).map(p => (
-              <button
-                key={p.id}
-                onClick={() => setPeriod(p.id)}
-                className={`px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
-                  period === p.id
-                    ? 'gradient-primary text-white shadow-sm'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                {p.label}
-              </button>
-            ))}
+          <div className="flex flex-col sm:flex-row gap-3">
+            <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)} className="input-field sm:w-48">
+              <option value="">همه دسته‌بندی مصارف</option>
+              {expenseCategories.map(c => (<option key={c} value={c}>{c}</option>))}
+            </select>
+            <select value={filterProduct} onChange={e => setFilterProduct(e.target.value)} className="input-field sm:w-48">
+              <option value="">همه محصولات</option>
+              {productNames.map(n => (<option key={n} value={n}>{n}</option>))}
+            </select>
+            <div className="flex gap-2">
+              {([{ id: 'daily' as ReportPeriod, label: 'روزانه' }, { id: 'monthly' as ReportPeriod, label: 'ماهانه' }, { id: 'yearly' as ReportPeriod, label: 'سالانه' }]).map(p => (
+                <button key={p.id} onClick={() => setPeriod(p.id)} className={`px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${period === p.id ? 'gradient-primary text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>{p.label}</button>
+              ))}
+            </div>
           </div>
         </div>
       </motion.div>
@@ -279,14 +231,15 @@ export default function Reports() {
           className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100"
         >
           <div className="flex items-center gap-3 mb-2">
-            <div className={`w-10 h-10 ${totalProfit >= 0 ? 'gradient-primary' : 'gradient-danger'} rounded-xl flex items-center justify-center`}>
+            <div className={`w-10 h-10 ${netProfit >= 0 ? 'gradient-primary' : 'gradient-danger'} rounded-xl flex items-center justify-center`}>
               <DollarSign className="w-5 h-5 text-white" />
             </div>
-            <span className="text-sm text-slate-500">سود خالص</span>
+            <span className="text-sm text-slate-500">سود خالص (COGS)</span>
           </div>
-          <p className={`text-xl font-bold ${totalProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-            {formatCurrency(totalProfit)}
+          <p className={`text-xl font-bold ${netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+            {formatCurrency(netProfit)}
           </p>
+          <p className="text-xs text-slate-400 mt-1">قیمت خرید: {formatCurrency(totalCOGS)}</p>
         </motion.div>
 
         <motion.div

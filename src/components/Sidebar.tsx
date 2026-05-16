@@ -11,6 +11,7 @@ import {
   Heart,
   ChevronLeft,
   ChevronRight,
+  Settings,
 } from 'lucide-react';
 import type { PageType } from '@/types';
 
@@ -30,6 +31,7 @@ const menuItems: { id: PageType; label: string; icon: React.ElementType }[] = [
   { id: 'customers', label: 'مشتریان', icon: Users },
   { id: 'suppliers', label: 'تأمین‌کنندگان', icon: Truck },
   { id: 'reports', label: 'گزارش‌ها', icon: BarChart3 },
+  { id: 'settings', label: 'تنظیمات و کتگوری', icon: Settings },
 ];
 
 export default function Sidebar({ currentPage, onNavigate, collapsed, onToggle }: SidebarProps) {
