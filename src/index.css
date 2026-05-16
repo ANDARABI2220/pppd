@@ -1,0 +1,86 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --radius: 0.625rem;
+  }
+
+  * {
+    font-family: 'Vazirmatn', sans-serif;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased;
+    direction: rtl;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-slate-100 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-slate-300 rounded-full hover:bg-slate-400;
+  }
+}
+
+@layer utilities {
+  .glass-card {
+    @apply bg-white/80 backdrop-blur-xl border border-white/20 shadow-lg;
+  }
+
+  .gradient-primary {
+    @apply bg-gradient-to-l from-emerald-500 to-teal-600;
+  }
+
+  .gradient-danger {
+    @apply bg-gradient-to-l from-rose-500 to-pink-600;
+  }
+
+  .gradient-warning {
+    @apply bg-gradient-to-l from-amber-500 to-orange-500;
+  }
+
+  .gradient-info {
+    @apply bg-gradient-to-l from-blue-500 to-indigo-600;
+  }
+
+  .sidebar-item {
+    @apply flex items-center gap-3 px-4 py-3 rounded-xl text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 transition-all duration-300 cursor-pointer;
+  }
+
+  .sidebar-item-active {
+    @apply bg-emerald-100 text-emerald-800 font-semibold shadow-sm;
+  }
+
+  .input-field {
+    @apply w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all duration-200;
+  }
+
+  .btn-primary {
+    @apply px-6 py-2.5 gradient-primary text-white rounded-xl font-medium hover:shadow-lg hover:shadow-emerald-500/25 active:scale-95 transition-all duration-200;
+  }
+
+  .btn-secondary {
+    @apply px-6 py-2.5 bg-slate-100 text-slate-700 rounded-xl font-medium hover:bg-slate-200 active:scale-95 transition-all duration-200;
+  }
+
+  .btn-danger {
+    @apply px-6 py-2.5 gradient-danger text-white rounded-xl font-medium hover:shadow-lg hover:shadow-rose-500/25 active:scale-95 transition-all duration-200;
+  }
+
+  .table-header {
+    @apply bg-slate-50 text-slate-600 text-xs uppercase tracking-wider;
+  }
+
+  .table-row {
+    @apply border-b border-slate-100 hover:bg-slate-50/80 transition-colors duration-150;
+  }
+}
+
